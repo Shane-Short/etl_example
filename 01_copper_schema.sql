@@ -9,6 +9,33 @@
 USE [MAData_Output_Production];
 GO
 
+-- =====================================================
+-- Drop all foreign key constraints first
+-- =====================================================
+DECLARE @sql NVARCHAR(MAX) = '';
+
+-- Drop all foreign keys referencing pm_flex_raw
+SELECT @sql = @sql + 'ALTER TABLE ' + QUOTENAME(OBJECT_SCHEMA_NAME(parent_object_id)) + '.' 
+    + QUOTENAME(OBJECT_NAME(parent_object_id)) + ' DROP CONSTRAINT ' + QUOTENAME(name) + '; '
+FROM sys.foreign_keys
+WHERE referenced_object_id = OBJECT_ID('dbo.pm_flex_raw');
+
+IF LEN(@sql) > 0
+    EXEC sp_executesql @sql;
+
+-- Drop all foreign keys referencing other copper tables
+SELECT @sql = @sql + 'ALTER TABLE ' + QUOTENAME(OBJECT_SCHEMA_NAME(parent_object_id)) + '.' 
+    + QUOTENAME(OBJECT_NAME(parent_object_id)) + ' DROP CONSTRAINT ' + QUOTENAME(name) + '; '
+FROM sys.foreign_keys
+WHERE referenced_object_id IN (
+    OBJECT_ID('dbo.pm_flex_load_log')
+);
+
+IF LEN(@sql) > 0
+    EXEC sp_executesql @sql;
+
+GO
+
 -- Drop table if exists (for redeployment)
 IF OBJECT_ID('dbo.pm_flex_raw', 'U') IS NOT NULL
     DROP TABLE dbo.pm_flex_raw;
