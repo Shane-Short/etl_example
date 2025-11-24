@@ -1,0 +1,290 @@
+# =====================================================
+# PM Flex Pipeline Configuration
+# =====================================================
+# This file controls ALL business rules and thresholds used in the ETL pipeline.
+# Change values here to adjust how PMs are classified and analyzed.
+#
+# AFTER CHANGING THIS FILE:
+# 1. Save changes
+# 2. Run: python run_etl_pipeline.py --full-refresh
+# 3. Verify changes in Power BI dashboard
+#
+# =====================================================
+# QUICK REFERENCE - MOST COMMON CHANGES
+# =====================================================
+#
+# CHANGE PM TIMING THRESHOLDS:
+#   → Go to: pm_timing section (line ~50)
+#   → Change early_threshold, late_threshold, overdue_threshold
+#   → Example: Make "Early" stricter? Change -15 to -10
+#
+# CHANGE CHRONIC TOOL CRITERIA:
+#   → Go to: chronic_tools.chronic_tool_threshold (line ~95)
+#   → Change unscheduled_pm_rate (default: 0.30 = 30%)
+#   → Change pm_life_variance (default: 0.40 = 40%)
+#   → Change min_pm_events (default: 5 PMs minimum)
+#
+# CHANGE CHRONIC SEVERITY LEVELS:
+#   → Go to: chronic_tools.severity_thresholds (line ~165)
+#   → Adjust low/medium/high/critical score cutoffs
+#
+# CHANGE CHRONIC SCORE WEIGHTS:
+#   → Go to: chronic_tools.score_weights (line ~135)
+#   → Adjust which factors matter most (must total 1.0)
+#
+# CHANGE DATA RETENTION:
+#   → Go to: retention section (line ~280)
+#   → Adjust copper_weeks, silver_weeks, gold_weeks
+#
+# =====================================================
+
+# Pipeline metadata
+pipeline:
+  name: "PM Flex Ingestion Pipeline"
+  version: "1.0.0"
+  owner: "Data Engineering Team"
+  
+# Database configuration (overridden by .env)
+database:
+  server: "TEHAUSTELSQL1"
+  database: "MAData_Output_Production"
+  schema: "dbo"
+  
+  # Table names
+  tables:
+    copper:
+      raw: "pm_flex_raw"
+      load_log: "pm_flex_load_log"
+    silver:
+      enriched: "pm_flex_enriched"
+      downtime_summary: "pm_flex_downtime_summary"
+      chronic_tools: "pm_flex_chronic_tools"
+      dim_date: "DimDate"
+      dim_entity: "DimEntity"
+    gold:
+      kpis_by_site: "fact_pm_kpis_by_site_ww"
+      kpis_by_ceid: "fact_pm_kpis_by_ceid_ww"
+      part_summary: "fact_part_replacement_summary"
+      chronic_history: "fact_chronic_tools_history"
+
+# Network share configuration (overridden by .env)
+network_share:
+  # Path format: \\server\share\Data\YYYYWWnn\PM_Flex.csv
+  root_path: "\\\\abc1234.asia.company.com\\ES_I-Pro\\Data"
+  file_name: "PM_Flex.csv"
+  
+# Data retention policies
+retention:
+  copper_weeks: 26      # 26 weeks in copper layer
+  silver_weeks: 104     # 2 years in silver layer
+  gold_weeks: 156       # 3 years in gold layer
+
+# ETL behavior
+etl:
+  # Bronze layer
+  bronze:
+    max_weeks_back: 4           # How far back to search for files
+    validate_schema: true       # Validate CSV schema
+    add_altair_flag: true       # Add Altair classification
+    batch_size: 1000            # Rows per batch for SQL insert
+  
+  # Silver layer
+  silver:
+    incremental_load: true      # Only process new data
+    chronic_tool_threshold:
+      unscheduled_pm_rate: 0.30       # 30% unscheduled = chronic indicator
+      pm_life_variance: 0.40          # 40% variance = chronic indicator
+      min_pm_events: 5                # Minimum PMs to calculate chronic score
+    
+  # Gold layer
+  gold:
+    rolling_window_weeks: 4     # 4-week rolling averages
+    
+# =====================================================
+# CHRONIC TOOL IDENTIFICATION
+# =====================================================
+# Rules for identifying tools with persistent PM/reliability issues
+#
+# A tool is flagged as "chronic" if:
+# 1. It has at least min_pm_events PMs, AND
+# 2. Either:
+#    - Unscheduled PM rate exceeds threshold, OR
+#    - PM life variance exceeds threshold
+#
+chronic_tools:
+  # ===================================================
+  # THRESHOLDS (When is a tool considered chronic?)
+  # ===================================================
+  chronic_tool_threshold:
+    # Minimum PM events required for chronic analysis
+    # Tools with fewer PMs are excluded from chronic classification
+    min_pm_events: 5      # Require at least 5 PMs
+                          # Lower = more tools flagged (but less reliable)
+                          # Higher = fewer tools flagged (but more reliable)
+    
+    # Unscheduled PM Rate threshold
+    # If tool's unscheduled PM rate exceeds this, it's chronic
+    unscheduled_pm_rate: 0.30  # 0.30 = 30%
+                               # Example: 10 PMs, 3+ unscheduled = chronic
+                               # To be more strict: 0.25 (25%)
+                               # To be less strict: 0.35 (35%)
+    
+    # PM Life Variance threshold
+    # Coefficient of variation (std_dev / mean)
+    # High variance = unpredictable PM timing
+    pm_life_variance: 0.40     # 0.40 = 40% coefficient of variation
+                               # Example: avg=10K wafers, std=4K+ = chronic
+                               # To be more strict: 0.30 (30%)
+                               # To be less strict: 0.50 (50%)
+  
+  # ===================================================
+  # CHRONIC SCORE CALCULATION (0-100)
+  # ===================================================
+  # How much each factor contributes to chronic score
+  # Total must equal 1.0 (100%)
+  #
+  # Score calculation:
+  # chronic_score = (factor1 × weight1) + (factor2 × weight2) + ...
+  #
+  # Each factor is normalized to 0-100 scale before weighting
+  #
+  score_weights:
+    unscheduled_pm_rate: 0.35  # 35% - Most important factor
+                               # High unscheduled rate = bigger problem
+    
+    pm_life_variance: 0.25     # 25% - Second most important
+                               # Unpredictable timing = reliability issue
+    
+    downtime_hours: 0.20       # 20% - Third most important
+                               # High downtime = production impact
+    
+    reclean_rate: 0.10         # 10% - Minor factor
+                               # Frequent recleans = quality issue
+    
+    sympathy_pm_rate: 0.10     # 10% - Minor factor
+                               # PMs triggered by other tool issues
+  
+  # ===================================================
+  # SEVERITY LEVELS (Based on chronic_score)
+  # ===================================================
+  # How to categorize chronic tools by severity
+  # Used for prioritization and reporting
+  #
+  # Score Range:
+  # 0-24: Not chronic (below all thresholds)
+  # 25-49: Low severity
+  # 50-74: Medium severity
+  # 75-89: High severity
+  # 90-100: Critical severity
+  #
+  severity_thresholds:
+    low: 25        # Score 25-49 = "Low" severity
+                   # Some issues, but not urgent
+    
+    medium: 50     # Score 50-74 = "Medium" severity
+                   # Notable issues, needs attention
+    
+    high: 75       # Score 75-89 = "High" severity
+                   # Serious issues, priority for intervention
+    
+    critical: 90   # Score 90-100 = "Critical" severity
+                   # Severe issues, immediate action required
+  
+  # ===================================================
+  # HOW TO ADJUST THRESHOLDS
+  # ===================================================
+  # If too many tools are flagged as chronic:
+  #   - Increase unscheduled_pm_rate (e.g., 0.35)
+  #   - Increase pm_life_variance (e.g., 0.50)
+  #   - Increase min_pm_events (e.g., 10)
+  #   - Increase severity thresholds
+  #
+  # If too few tools are flagged as chronic:
+  #   - Decrease unscheduled_pm_rate (e.g., 0.25)
+  #   - Decrease pm_life_variance (e.g., 0.30)
+  #   - Decrease min_pm_events (e.g., 3)
+  #   - Decrease severity thresholds
+  #
+  # To emphasize different factors:
+  #   - Adjust score_weights (must total 1.0)
+  #   - Example: If downtime is most important,
+  #     change downtime_hours to 0.40 and reduce others
+
+# =====================================================
+# PM TIMING CLASSIFICATION
+# =====================================================
+# How PMs are classified based on wafer count vs target
+# Calculation: deviation = (actual_wafers - target_wafers) / target_wafers * 100
+#
+# Example with early_threshold = -15:
+#   Target: 10,000 wafers
+#   PM done at 8,500 wafers → -15% deviation → "Early"
+#   PM done at 9,000 wafers → -10% deviation → "On-Time"
+#   PM done at 11,500 wafers → +15% deviation → "Late"
+#   PM done at 13,500 wafers → +35% deviation → "Overdue"
+#
+pm_timing:
+  # Early: PM done significantly before target
+  early_threshold: -15    # % below target (use negative number)
+                          # Example: -15 means >15% below target
+                          # To change to 10%: set to -10
+  
+  # On-Time: PM done within acceptable range of target  
+  on_time_min: -15        # Lower bound (must match early_threshold)
+  on_time_max: 15         # Upper bound (% above target)
+                          # Example: -15 to 15 = within ±15% is "On-Time"
+  
+  # Late: PM done moderately after target
+  late_threshold: 15      # % above target
+                          # Example: 15 means >15% above target
+                          # Range: on_time_max to overdue_threshold
+  
+  # Overdue: PM done significantly after target  
+  overdue_threshold: 30   # % above target
+                          # Example: 30 means >30% above target
+                          # Anything above this is "Overdue"
+
+# Data quality rules
+data_quality:
+  # Maximum allowed null percentage for critical columns
+  critical_columns:
+    - ENTITY
+    - FACILITY
+    - CEID
+    - YEARWW
+  max_null_pct: 50        # Fail if >50% nulls in critical column
+  
+  # Row count validation
+  row_count_tolerance: 0.20  # ±20% from previous week
+
+# Logging
+logging:
+  level: "INFO"           # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "detailed"      # simple, detailed
+  file_rotation:
+    max_bytes: 10485760   # 10 MB
+    backup_count: 5
+
+# Alerting (optional - configure based on your setup)
+alerts:
+  enabled: false
+  email:
+    recipients: []
+    smtp_server: ""
+    smtp_port: 587
+  
+  # Alert conditions
+  conditions:
+    - type: "pipeline_failure"
+      severity: "high"
+    - type: "data_quality_failure"
+      severity: "medium"
+    - type: "row_count_anomaly"
+      severity: "low"
+
+# Schedule (for Azure DevOps pipeline)
+schedule:
+  # Weekly on Wednesday at 5:00 AM PST
+  cron: "0 5 * * 3"
+  timezone: "America/Los_Angeles"
+  enabled: true
