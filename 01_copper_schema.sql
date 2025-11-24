@@ -1,45 +1,98 @@
 -- =====================================================
--- PM Flex Pipeline - Copper Layer (Bronze/Raw Data)
+-- BRONZE/COPPER LAYER SCHEMA
 -- =====================================================
--- This script creates the raw data tables for PM_Flex ingestion
--- Database: MAData_Output_Production
--- Schema: dbo
+-- Raw data tables for PM_Flex ingestion
+-- 
+-- Tables:
+--   - pm_flex_raw: Raw PM_Flex CSV data
+--   - pm_flex_load_log: ETL execution tracking
 -- =====================================================
 
-USE [MAData_Output_Production];
-GO
-
 -- =====================================================
--- Drop all foreign key constraints first
+-- Drop tables in correct order
+-- Child tables (with foreign keys) must be dropped first
 -- =====================================================
-DECLARE @sql NVARCHAR(MAX) = '';
 
--- Drop all foreign keys referencing pm_flex_raw
-SELECT @sql = @sql + 'ALTER TABLE ' + QUOTENAME(OBJECT_SCHEMA_NAME(parent_object_id)) + '.' 
-    + QUOTENAME(OBJECT_NAME(parent_object_id)) + ' DROP CONSTRAINT ' + QUOTENAME(name) + '; '
-FROM sys.foreign_keys
-WHERE referenced_object_id = OBJECT_ID('dbo.pm_flex_raw');
+PRINT 'Dropping tables in dependency order...';
 
-IF LEN(@sql) > 0
-    EXEC sp_executesql @sql;
+-- Gold layer fact tables (reference silver)
+IF OBJECT_ID('dbo.fact_chronic_tools_history', 'U') IS NOT NULL
+BEGIN
+    PRINT '  Dropping fact_chronic_tools_history...';
+    DROP TABLE dbo.fact_chronic_tools_history;
+END
 
--- Drop all foreign keys referencing other copper tables
-SELECT @sql = @sql + 'ALTER TABLE ' + QUOTENAME(OBJECT_SCHEMA_NAME(parent_object_id)) + '.' 
-    + QUOTENAME(OBJECT_NAME(parent_object_id)) + ' DROP CONSTRAINT ' + QUOTENAME(name) + '; '
-FROM sys.foreign_keys
-WHERE referenced_object_id IN (
-    OBJECT_ID('dbo.pm_flex_load_log')
-);
+IF OBJECT_ID('dbo.fact_part_replacement_summary', 'U') IS NOT NULL
+BEGIN
+    PRINT '  Dropping fact_part_replacement_summary...';
+    DROP TABLE dbo.fact_part_replacement_summary;
+END
 
-IF LEN(@sql) > 0
-    EXEC sp_executesql @sql;
+IF OBJECT_ID('dbo.fact_pm_kpis_by_ceid_ww', 'U') IS NOT NULL
+BEGIN
+    PRINT '  Dropping fact_pm_kpis_by_ceid_ww...';
+    DROP TABLE dbo.fact_pm_kpis_by_ceid_ww;
+END
 
-GO
+IF OBJECT_ID('dbo.fact_pm_kpis_by_site_ww', 'U') IS NOT NULL
+BEGIN
+    PRINT '  Dropping fact_pm_kpis_by_site_ww...';
+    DROP TABLE dbo.fact_pm_kpis_by_site_ww;
+END
 
--- Drop table if exists (for redeployment)
+-- Silver layer tables (reference copper)
+IF OBJECT_ID('dbo.pm_flex_chronic_tools', 'U') IS NOT NULL
+BEGIN
+    PRINT '  Dropping pm_flex_chronic_tools...';
+    DROP TABLE dbo.pm_flex_chronic_tools;
+END
+
+IF OBJECT_ID('dbo.pm_flex_downtime_summary', 'U') IS NOT NULL
+BEGIN
+    PRINT '  Dropping pm_flex_downtime_summary...';
+    DROP TABLE dbo.pm_flex_downtime_summary;
+END
+
+IF OBJECT_ID('dbo.pm_flex_enriched', 'U') IS NOT NULL
+BEGIN
+    PRINT '  Dropping pm_flex_enriched...';
+    DROP TABLE dbo.pm_flex_enriched;
+END
+
+-- Copper layer tables (base tables)
 IF OBJECT_ID('dbo.pm_flex_raw', 'U') IS NOT NULL
+BEGIN
+    PRINT '  Dropping pm_flex_raw...';
     DROP TABLE dbo.pm_flex_raw;
+END
+
+IF OBJECT_ID('dbo.pm_flex_load_log', 'U') IS NOT NULL
+BEGIN
+    PRINT '  Dropping pm_flex_load_log...';
+    DROP TABLE dbo.pm_flex_load_log;
+END
+
+-- Dimension tables
+IF OBJECT_ID('dbo.DimEntity', 'U') IS NOT NULL
+BEGIN
+    PRINT '  Dropping DimEntity...';
+    DROP TABLE dbo.DimEntity;
+END
+
+IF OBJECT_ID('dbo.DimDate', 'U') IS NOT NULL
+BEGIN
+    PRINT '  Dropping DimDate...';
+    DROP TABLE dbo.DimDate;
+END
+
+PRINT 'All tables dropped successfully.';
+PRINT '';
+
 GO
+
+-- =====================================================
+-- CREATE TABLES
+-- =====================================================
 
 -- =====================================================
 -- Table: pm_flex_raw
