@@ -64,6 +64,22 @@ def load_environment() -> Dict[str, Any]:
         "silver_retention_weeks": int(os.getenv("SILVER_RETENTION_WEEKS", "104")),
         "gold_retention_weeks": int(os.getenv("GOLD_RETENTION_WEEKS", "156")),
     }
+
+    # Normalize network paths for Windows (convert / to \)
+    if 'network_share' in config and 'root_path' in config['network_share']:
+        path = config['network_share']['root_path']
+        # Convert forward slashes to backslashes for Windows UNC paths
+        if path.startswith('//'):
+            path = '\\\\' + path[2:].replace('/', '\\')
+        config['network_share']['root_path'] = path
+    
+    # Also normalize environment variables
+    for key in ['NETWORK_SHARE_ROOT', 'NETWORK_SHARE_PATH']:
+        if key in config:
+            path = config[key]
+            if path.startswith('//'):
+                path = '\\\\' + path[2:].replace('/', '\\')
+            config[key] = path
     
     return config
 
