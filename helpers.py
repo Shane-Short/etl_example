@@ -210,7 +210,7 @@ def validate_pm_flex_schema(df: pd.DataFrame) -> bool:
         "PM_REDUCTION_ROI", "NORMALIZING_FACTOR", "PM_REDUCTION_ROI_NORMALIZED",
         "G2G_PER_PM", "EQUIPMENT_DOWNTIME_ROI(Hrs)", "PART_COST_PER_PM",
         "PART_COST_SAVING_ROI($)", "PM_DURATION", "MTS_NEEDED", "LABORHOUR_PER_PM",
-        "LABORHOUR_PER_PM.1", "LABOR_HOUR_ROI(Hrs)", "HEADCOUNT_ROI(#)"
+        "LABOR_HOUR_ROI(Hrs)", "HEADCOUNT_ROI(#)"
     ]
     
     # Check for missing columns
