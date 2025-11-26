@@ -50,6 +50,10 @@ def setup_logger(
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(simple_formatter)
     logger.addHandler(console_handler)
+
+    # Force UTF-8 encoding for console output
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
     
     # File handler (if log file specified)
     if log_file:
