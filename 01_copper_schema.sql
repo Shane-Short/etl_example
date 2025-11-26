@@ -205,7 +205,6 @@ CREATE TABLE dbo.pm_flex_raw (
     PM_DURATION FLOAT,
     MTS_NEEDED FLOAT,
     LABORHOUR_PER_PM FLOAT,
-    LABORHOUR_PER_PM_2 FLOAT,  -- Note: Changed .1 to _2
     LABOR_HOUR_ROI_Hrs FLOAT,  -- Note: Removed parentheses from column name
     HEADCOUNT_ROI FLOAT  -- Note: Removed (#) from column name
 );
