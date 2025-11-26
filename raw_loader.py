@@ -67,7 +67,17 @@ class PMFlexRawLoader:
         self.logger.info(f"Starting load for {file_path}")
         
         # Step 1: Read CSV file
-        df = self._read_csv(file_path)
+        # Try multiple encodings
+        for encoding in ['utf-8', 'utf-8-sig', 'latin1', 'cp1252']:
+            try:
+                df = pd.read_csv(file_path, encoding=encoding)
+                self.logger.info(f"Successfully read file with {encoding} encoding")
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            raise ValueError(f"Could not read file with any supported encoding: {file_path}")
+    
         self.logger.info(f"Read {len(df)} rows from CSV")
         
         # Step 2: Validate schema
