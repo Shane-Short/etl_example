@@ -243,7 +243,6 @@ class PMFlexRawLoader:
         column_mappings = {
             'EQUIPMENT_DOWNTIME_ROI(Hrs)': 'EQUIPMENT_DOWNTIME_ROI_Hrs',
             'PART_COST_SAVING_ROI($)': 'PART_COST_SAVING_ROI',
-            'LABORHOUR_PER_PM.1': 'LABORHOUR_PER_PM_2',
             'LABOR_HOUR_ROI(Hrs)': 'LABOR_HOUR_ROI_Hrs',
             'HEADCOUNT_ROI(#)': 'HEADCOUNT_ROI'
         }
