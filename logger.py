@@ -9,6 +9,19 @@ import sys
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from typing import Optional
+import sys
+import os
+
+# Force UTF-8 encoding for Windows console
+if sys.platform == 'win32':
+    # Set environment variable for Python to use UTF-8
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+    
+    # Reconfigure stdout and stderr
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8')
 
 
 def setup_logger(
