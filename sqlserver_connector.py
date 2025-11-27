@@ -155,21 +155,32 @@ class SQLServerConnector:
             row_count = len(df)
             
             self.logger.info(
-                f"Loading {row_count} rows to {schema}.{table_name} "
-                f"(mode: {if_exists})"
+                f"Loading {row_count:,} rows to {schema}.{table_name} in batches of {chunksize}..."
             )
             
-            df.to_sql(
-                name=table_name,
-                con=self.engine,
-                schema=schema,
-                if_exists=if_exists,
-                index=False,
-                chunksize=chunksize,
-                method="multi"
-            )
+            # Load data in batches with progress logging
+            total_batches = (row_count + chunksize - 1) // chunksize
             
-            self.logger.info(f"Successfully loaded {row_count} rows")
+            for i, start in enumerate(range(0, row_count, chunksize), 1):
+                end = min(start + chunksize, row_count)
+                batch_df = df.iloc[start:end]
+                
+                # Load this batch
+                batch_df.to_sql(
+                    name=table_name,
+                    con=self.engine,
+                    schema=schema,
+                    if_exists='append' if i > 1 or if_exists == 'append' else if_exists,
+                    index=False,
+                    chunksize=None,  # Don't chunk within the batch
+                    method=None  # Use default insert method (more reliable)
+                )
+                
+                # Log progress every 5 batches
+                if i % 5 == 0 or i == total_batches:
+                    self.logger.info(f"  Progress: Batch {i}/{total_batches} ({end:,}/{row_count:,} rows)")
+            
+            self.logger.info(f"✓ Successfully loaded {row_count:,} rows")
             return row_count
             
         except Exception as e:
