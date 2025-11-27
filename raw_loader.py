@@ -66,41 +66,105 @@ class PMFlexRawLoader:
         
         self.logger.info(f"Starting load for {file_path}")
         
-        # Step 1: Read CSV file
-        # Try multiple encodings
+        # Step 1: Read CSV file with multiple encoding attempts
+        self.logger.info("Reading CSV file...")
+        df = None
         for encoding in ['utf-8', 'utf-8-sig', 'latin1', 'cp1252']:
             try:
-                df = pd.read_csv(file_path, encoding=encoding)
-                self.logger.info(f"Successfully read file with {encoding} encoding")
+                df = pd.read_csv(file_path, encoding=encoding, low_memory=False)
+                self.logger.info(f"✓ Successfully read file with {encoding} encoding")
                 break
             except UnicodeDecodeError:
+                self.logger.debug(f"  Failed with {encoding}, trying next...")
                 continue
-        else:
+        
+        if df is None:
             raise ValueError(f"Could not read file with any supported encoding: {file_path}")
     
-        self.logger.info(f"Read {len(df)} rows from CSV")
+        self.logger.info(f"✓ Read {len(df):,} rows and {len(df.columns)} columns from CSV")
         
-        # Step 2: Validate schema
+        # Step 2: Rename columns with special characters
+        self.logger.info("Renaming special character columns...")
+        column_renames = {
+            'EQUIPMENT_DOWNTIME_ROI(Hrs)': 'EQUIPMENT_DOWNTIME_ROI_Hrs',
+            'PART_COST_SAVING_ROI($)': 'PART_COST_SAVING_ROI',
+            'LABOR_HOUR_ROI(Hrs)': 'LABOR_HOUR_ROI_Hrs',
+            'HEADCOUNT_ROI(#)': 'HEADCOUNT_ROI'
+        }
+        
+        renamed_count = 0
+        for old_name, new_name in column_renames.items():
+            if old_name in df.columns:
+                df = df.rename(columns={old_name: new_name})
+                renamed_count += 1
+        
+        if renamed_count > 0:
+            self.logger.info(f"✓ Renamed {renamed_count} columns")
+        
+        # Step 3: Validate schema
         if validate_schema:
+            self.logger.info("Validating schema...")
             self._validate_schema(df)
+            self.logger.info("✓ Schema validation passed")
         
-        # Step 3: Add metadata columns
+        # Step 4: Add metadata columns
+        self.logger.info("Adding metadata columns...")
         df = self._add_metadata(df, file_path, work_week)
         
-        # Step 4: Add Altair classification (optional)
+        # Step 5: Add Altair classification (optional)
         if add_altair:
+            self.logger.info("Adding Altair classification...")
             df = self._add_altair_classification(df)
+            self.logger.info("✓ Altair classification added")
         
-        # Step 5: Clean column names for SQL
+        # Step 6: Clean column names for SQL
+        self.logger.info("Cleaning column names for SQL...")
         df = self._clean_column_names(df)
         
-        # Step 6: Data quality checks
-        self._data_quality_checks(df)
+        # Step 7: Prepare data types for SQL Server
+        self.logger.info("Preparing data types for SQL Server...")
         
-        # Step 7: Load to SQL Server
+        # Replace NaN with None for SQL NULL
+        df = df.where(pd.notna(df), None)
+        
+        # Convert datetime columns to proper datetime type
+        datetime_columns = [
+            'TXN_DATE',
+            'CKL_START_TIME',
+            'CKL_END_TIME',
+            'DOWN_WINDOW_START_TXN_DATE',
+            'DOWN_WINDOW_END_TXN_DATE'
+        ]
+        
+        for col in datetime_columns:
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col], errors='coerce')
+        
+        # Ensure numeric columns are proper numeric types
+        numeric_keywords = ['COST', 'ROI', 'HOUR', 'DELTA', 'COUNT', 'RATE', 'PERCENT']
+        for col in df.columns:
+            if any(keyword in col.upper() for keyword in numeric_keywords):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # Ensure string columns don't have 'nan' strings
+        string_columns = ['ENTITY', 'FACILITY', 'CEID', 'DOWNTIME_TYPE', 'DOWNTIME_CLASS', 'YEARWW']
+        for col in string_columns:
+            if col in df.columns:
+                df[col] = df[col].astype(str)
+                df[col] = df[col].replace('nan', None).replace('None', None)
+        
+        self.logger.info("✓ Data types prepared")
+        
+        # Step 8: Data quality checks
+        self.logger.info("Running data quality checks...")
+        self._data_quality_checks(df)
+        self.logger.info("✓ Data quality checks passed")
+        
+        # Step 9: Load to SQL Server
+        self.logger.info("Loading data to SQL Server...")
         rows_loaded = self._load_to_sql(df)
         
-        # Step 8: Log the load
+        # Step 10: Log the load
         execution_time = time.time() - start_time
         self._log_load(
             source_file=str(file_path),
@@ -121,7 +185,7 @@ class PMFlexRawLoader:
         }
         
         self.logger.info(
-            f"Load completed successfully: {rows_loaded} rows in "
+            f"✓ Load completed successfully: {rows_loaded:,} rows in "
             f"{execution_time:.2f} seconds"
         )
         
