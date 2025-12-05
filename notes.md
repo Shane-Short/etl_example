@@ -1,300 +1,266 @@
-CREATE TABLE dbo.pm_flex_enriched (
-    -- Auto-generated ID
-    pm_flex_enriched_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+"""
+Populate DimDate dimension table with complete date attributes.
+"""
+
+import pandas as pd
+from datetime import datetime, timedelta
+from typing import Dict, Any
+import logging
+from connectors.sqlserver_connector import SQLServerConnector
+from utils.helpers import get_intel_work_week
+
+
+def populate_dim_date(
+    start_year: int = 2020,
+    end_year: int = 2030,
+    connector: SQLServerConnector = None
+) -> int:
+    """
+    Populate DimDate table with complete date dimension.
     
-    -- Foreign key to Bronze layer
-    source_pm_flex_raw_id BIGINT,
+    Generates all dates from start_year to end_year with:
+    - Standard calendar attributes
+    - Intel fiscal calendar attributes
+    - Work week mappings
     
-    -- =====================================================
-    -- ALL 88 ORIGINAL COLUMNS FROM PM_FLEX_RAW
-    -- =====================================================
-    ENTITY VARCHAR(100),
-    FACILITY VARCHAR(50),
-    UNIQUE_ENTITY_ID VARCHAR(100),
-    SUPPLIER VARCHAR(100),
-    FUNCTIONAL_AREA VARCHAR(100),
-    TOOLSET VARCHAR(100),
-    CEID VARCHAR(100),
-    VFMFGID VARCHAR(100),
-    CUSTOM_MODULE_GROUP VARCHAR(100),
-    Dominant_Tech_Node VARCHAR(50),
-    PM_NAME VARCHAR(200),
-    ATTRIBUTE_NAME VARCHAR(200),
-    YEARWW VARCHAR(20),
-    TXN_DATE DATETIME,
-    PREV_ATTRIBUTE_VALUE FLOAT,
-    ATTRIBUTE_VALUE FLOAT,
-    NEXT_ATTRIBUTE_VALUE FLOAT,
-    CUSTOM_DELTA FLOAT,
-    Lower_IQR_Limit_Delta FLOAT,
-    Median_Delta FLOAT,
-    Delta_75th_Percentile FLOAT,
-    COUNTER_UPPER_VALUE FLOAT,
-    UPPER_LIMIT_FACILITY FLOAT,
-    upper_limit_perc_target FLOAT,
-    Met_Upper_Limit VARCHAR(10),
-    PM_Label VARCHAR(100),
-    GVB_PMCycle_Label VARCHAR(100),
-    PMCycle_Counter_by_UEI_AttrName INT,
-    CHECKLIST_NAME VARCHAR(200),
-    CKL_START_TIME DATETIME,
-    CKL_END_TIME DATETIME,
-    CKL_DURATION_IN_HOURS FLOAT,
-    NUM_STEPS_IN_CL INT,
-    MIN_OF_CKL_START_END_DISTANCE_TO_TXN_DATE FLOAT,
-    CL_NAME_SIMILARITY_SCORE FLOAT,
-    MOST_FREQUENT_CHECKLIST_FACILITY_CMG_TECHNODE VARCHAR(200),
-    DURATION_IN_HOURS_75TH_PERCENTILE FLOAT,
-    pm_cycle_utilization FLOAT,
-    reliable_upper_limit_insight VARCHAR(50),
-    TECHNODE_CEID_VFMFGID VARCHAR(200),
-    PARENT_ENTITY VARCHAR(100),
-    UNIQUE_PARENT_FAB VARCHAR(100),
-    SUB_ENTITY_ASSOCIATED_TO_ATTR VARCHAR(100),
-    ATTRIBUTE_NAME_ASSOCIATED_ENTITY VARCHAR(200),
-    num_of_resets_on_parent_txndate INT,
-    multiple_or_single_pm VARCHAR(50),
-    Sympathy_PM VARCHAR(10),
-    most_common_pm_grouping VARCHAR(100),
-    MOST_COMMON_PM_TYPE VARCHAR(100),
-    PM_FREQUENCY VARCHAR(50),
-    WINDOW_ID VARCHAR(100),
-    DOWN_WINDOW_START_TXN_DATE DATETIME,
-    DOWN_WINDOW_END_TXN_DATE DATETIME,
-    DOWN_WINDOW_DURATION_HR FLOAT,
-    DOWN_WINDOW_DETAILS VARCHAR(MAX),
-    DOWN_WINDOW_COMMENTS VARCHAR(MAX),
-    ALL_STATES_IN_WINDOW VARCHAR(MAX),
-    WINDOW_TYPE VARCHAR(100),
-    DOWNTIME_TYPE VARCHAR(100),
-    DOWNTIME_CLASS VARCHAR(100),
-    DOWNTIME_SUBCLASS VARCHAR(200),
-    OLD_ENTITY_STATE VARCHAR(100),
-    NEW_ENTITY_STATE VARCHAR(100),
-    Reclean_Label VARCHAR(50),
-    Down_Window_Reclean_Rate FLOAT,
-    DOWN_WINDOW_DURATION_OUTLIER_THRESHOLD_FOR_TOOLSET FLOAT,
-    DOWN_WINDOW_DURATION_OUTLIER_LABEL_FOR_PMCYCLE VARCHAR(50),
-    WORKORDERID VARCHAR(100),
-    WO_TOOLNAME VARCHAR(100),
-    WO_DESCRIPTION VARCHAR(MAX),
-    PM_Reason_Deepdive VARCHAR(MAX),
-    DOWNTIME_SUBCLASS_DETAILS VARCHAR(MAX),
-    UPPER_LIMIT_THRESHOLD FLOAT,
-    UPPER_VALUE_THRESHOLD FLOAT,
-    VALUE_LOSS_AT_PMRESET FLOAT,
-    PM_REDUCTION_ROI FLOAT,
-    NORMALIZING_FACTOR FLOAT,
-    PM_REDUCTION_ROI_NORMALIZED FLOAT,
-    G2G_PER_PM FLOAT,
-    EQUIPMENT_DOWNTIME_ROI_Hrs FLOAT,
-    PART_COST_PER_PM FLOAT,
-    PART_COST_SAVING_ROI FLOAT,
-    PM_DURATION FLOAT,
-    MTS_NEEDED FLOAT,
-    LABORHOUR_PER_PM FLOAT,
-    LABOR_HOUR_ROI_Hrs FLOAT,
-    HEADCOUNT_ROI FLOAT,
+    Args:
+        start_year: First year to include
+        end_year: Last year to include
+        connector: Database connector (creates new if not provided)
+        
+    Returns:
+        Number of rows inserted
+    """
+    logger = logging.getLogger("pm_flex_pipeline.dim_date")
     
-    -- =====================================================
-    -- CALCULATED COLUMNS ADDED BY SILVER LAYER
-    -- =====================================================
+    logger.info(f"Generating date dimension from {start_year} to {end_year}...")
     
-    -- PM Timing Classification
-    pm_life_vs_target FLOAT,
-    pm_timing_classification VARCHAR(20),
+    # Generate all dates in range
+    start_date = datetime(start_year, 1, 1)
+    end_date = datetime(end_year, 12, 31)
     
-    -- PM Life Statistics
-    avg_pm_life FLOAT,
-    median_pm_life FLOAT,
-    pm_life_variance FLOAT,
-    pm_life_std_dev FLOAT,
+    date_list = []
+    current_date = start_date
     
-    -- Downtime Metrics
-    total_downtime_hours FLOAT,
-    avg_downtime_hours FLOAT,
-    median_downtime_hours FLOAT,
-    downtime_variance FLOAT,
-    scheduled_downtime_hours FLOAT,
-    unscheduled_downtime_hours FLOAT,
+    while current_date <= end_date:
+        # Calculate all date attributes
+        date_attrs = calculate_date_attributes(current_date)
+        date_list.append(date_attrs)
+        
+        # Move to next day
+        current_date += timedelta(days=1)
     
-    -- PM Type Rates
-    unscheduled_pm_rate FLOAT,
-    scheduled_pm_rate FLOAT,
-    reclean_rate FLOAT,
-    sympathy_pm_rate FLOAT,
+    logger.info(f"Generated {len(date_list):,} date records")
     
-    -- Chronic Tool Flags
-    chronic_flag BIT,
-    chronic_score FLOAT,
-    chronic_severity VARCHAR(20),
+    # Create DataFrame
+    df = pd.DataFrame(date_list)
     
-    -- Work Week Metrics
-    ww_year INT,
-    ww_number INT,
+    # Load to database
+    close_connector = False
+    if connector is None:
+        connector = SQLServerConnector()
+        close_connector = True
     
-    -- Data Quality
-    data_quality_score FLOAT,
+    try:
+        # Truncate existing data
+        logger.info("Truncating DimDate table...")
+        connector.truncate_table('DimDate', 'dbo')
+        
+        # Load new data
+        logger.info("Loading date dimension to database...")
+        rows_loaded = connector.load_dataframe(
+            df=df,
+            table_name='DimDate',
+            schema='dbo',
+            if_exists='append',
+            chunksize=5000
+        )
+        
+        logger.info(f"Successfully loaded {rows_loaded:,} dates to DimDate")
+        return rows_loaded
+        
+    finally:
+        if close_connector:
+            connector.close()
+
+
+def calculate_date_attributes(date: datetime) -> Dict[str, Any]:
+    """
+    Calculate all attributes for a single date.
     
-    -- Altair Flag (from Bronze)
-    AltairFlag VARCHAR(20),
+    Args:
+        date: Date to calculate attributes for
+        
+    Returns:
+        Dictionary with all date attributes
+    """
+    # Basic calendar attributes
+    date_key = int(date.strftime('%Y%m%d'))
+    year = date.year
+    month = date.month
+    day = date.day
     
-    -- =====================================================
-    -- METADATA
-    -- =====================================================
-    enrichment_timestamp DATETIME DEFAULT GETDATE(),
-    source_file VARCHAR(500),
-    source_ww VARCHAR(20),
-    load_timestamp DATETIME
-);
+    # Quarter (1-4)
+    quarter = (month - 1) // 3 + 1
+    
+    # Week of year (ISO week)
+    week_of_year = date.isocalendar()[1]
+    
+    # Day of year (1-365/366)
+    day_of_year = date.timetuple().tm_yday
+    
+    # Day of week (0=Monday, 6=Sunday)
+    day_of_week = date.weekday()
+    
+    # Day name
+    day_name = date.strftime('%A')
+    
+    # Month name
+    month_name = date.strftime('%B')
+    
+    # Is weekend (Saturday=5, Sunday=6)
+    is_weekend = 1 if day_of_week >= 5 else 0
+    
+    # Intel fiscal calendar
+    # Intel fiscal year starts last Saturday of December
+    fiscal_year = calculate_intel_fiscal_year(date)
+    fiscal_quarter = calculate_intel_fiscal_quarter(date)
+    fiscal_month = month  # Simplified - adjust if Intel has different fiscal months
+    
+    # Intel work week (e.g., "2025WW46")
+    try:
+        work_week = get_intel_work_week(date)
+        # Parse work week to get year and number
+        if work_week and 'WW' in work_week:
+            ww_year = int(work_week[:4])
+            ww_number = int(work_week[6:])
+        else:
+            ww_year = None
+            ww_number = None
+    except:
+        work_week = None
+        ww_year = None
+        ww_number = None
+    
+    return {
+        'date_key': date_key,
+        'date_value': date,
+        'year': year,
+        'quarter': quarter,
+        'month': month,
+        'week_of_year': week_of_year,
+        'day_of_year': day_of_year,
+        'day_of_month': day,
+        'day_of_week': day_of_week,
+        'day_name': day_name,
+        'month_name': month_name,
+        'is_weekend': is_weekend,
+        'is_holiday': 0,  # Can be updated later with holiday calendar
+        'fiscal_year': fiscal_year,
+        'fiscal_quarter': fiscal_quarter,
+        'fiscal_month': fiscal_month,
+        'fiscal_week': work_week,
+        'work_week': work_week,
+        'ww_year': ww_year,
+        'ww_number': ww_number
+    }
+
+
+def calculate_intel_fiscal_year(date: datetime) -> int:
+    """
+    Calculate Intel fiscal year for a given date.
+    
+    Intel fiscal year starts on the last Saturday of December.
+    
+    Args:
+        date: Date to calculate fiscal year for
+        
+    Returns:
+        Fiscal year (e.g., 2025)
+    """
+    # Find last Saturday of December of current year
+    dec_31 = datetime(date.year, 12, 31)
+    
+    # Work backwards to find last Saturday
+    days_back = (dec_31.weekday() + 2) % 7  # Saturday is 5, so we need to go back
+    last_saturday = dec_31 - timedelta(days=days_back)
+    
+    # If date is on or after last Saturday of Dec, it's next fiscal year
+    if date >= last_saturday:
+        return date.year + 1
+    else:
+        return date.year
+
+
+def calculate_intel_fiscal_quarter(date: datetime) -> int:
+    """
+    Calculate Intel fiscal quarter (simplified version).
+    
+    Args:
+        date: Date to calculate fiscal quarter for
+        
+    Returns:
+        Fiscal quarter (1-4)
+    """
+    fiscal_year = calculate_intel_fiscal_year(date)
+    
+    # Simplified: Use calendar quarter adjusted for fiscal year start
+    # Fiscal Q1 starts with fiscal year (late Dec)
+    # This is simplified - actual Intel fiscal calendar may be different
+    
+    if date.month >= 1 and date.month <= 3:
+        return 2
+    elif date.month >= 4 and date.month <= 6:
+        return 3
+    elif date.month >= 7 and date.month <= 9:
+        return 4
+    else:  # Oct, Nov, Dec
+        # Check if before or after fiscal year boundary
+        last_sat = datetime(date.year, 12, 31)
+        days_back = (last_sat.weekday() + 2) % 7
+        last_saturday = last_sat - timedelta(days=days_back)
+        
+        if date >= last_saturday:
+            return 1  # New fiscal year
+        else:
+            return 4  # End of current fiscal year
 
 
 
 
 
 
-
-
-CREATE TABLE dbo.pm_flex_chronic_tools (
-    -- Auto-generated ID
-    chronic_tool_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+def run_silver_etl(
+    incremental: bool = True,
+    full_refresh: bool = False
+) -> dict:
+    """Execute silver layer ETL."""
     
-    -- Tool identification
-    ENTITY VARCHAR(100),
-    FACILITY VARCHAR(50),
-    CEID VARCHAR(100),
-    YEARWW VARCHAR(20),
+    # ... existing setup code ...
     
-    -- PM Event Counts
-    total_pm_events INT,
-    scheduled_pm_count INT,
-    unscheduled_pm_count INT,
-    unscheduled_pm_rate FLOAT,
-    
-    -- PM Life Statistics
-    avg_pm_life FLOAT,
-    median_pm_life FLOAT,
-    pm_life_variance FLOAT,
-    pm_life_std_dev FLOAT,
-    
-    -- Downtime Metrics
-    total_downtime_hours FLOAT,
-    avg_downtime_hours FLOAT,
-    median_downtime_hours FLOAT,
-    scheduled_downtime_hours FLOAT,
-    unscheduled_downtime_hours FLOAT,
-    
-    -- Reclean Metrics
-    reclean_count INT,
-    reclean_rate FLOAT,
-    
-    -- Sympathy PM Metrics
-    sympathy_pm_count INT,
-    sympathy_pm_rate FLOAT,
-    
-    -- Chamber/Tool Metrics
-    total_chambers INT,
-    chronic_chambers INT,
-    
-    -- Chronic Scoring
-    chronic_score FLOAT,
-    chronic_severity VARCHAR(20),
-    chronic_flag BIT,
-    
-    -- Altair Classification
-    AltairFlag VARCHAR(20),
-    
-    -- Metadata
-    calculation_timestamp DATETIME DEFAULT GETDATE(),
-    
-    -- Unique constraint
-    CONSTRAINT UQ_chronic_tools UNIQUE (ENTITY, FACILITY, CEID, YEARWW)
-);
-
-
-
-
-
-CREATE TABLE dbo.pm_flex_downtime_summary (
-    -- Auto-generated ID
-    downtime_summary_id BIGINT IDENTITY(1,1) PRIMARY KEY,
-    
-    -- Grouping keys
-    ENTITY VARCHAR(100),
-    FACILITY VARCHAR(50),
-    CEID VARCHAR(100),
-    YEARWW VARCHAR(20),
-    DOWNTIME_TYPE VARCHAR(100),
-    DOWNTIME_CLASS VARCHAR(100),
-    
-    -- Downtime Aggregations
-    total_downtime_hours FLOAT,
-    avg_downtime_hours FLOAT,
-    median_downtime_hours FLOAT,
-    min_downtime_hours FLOAT,
-    max_downtime_hours FLOAT,
-    downtime_variance FLOAT,
-    downtime_std_dev FLOAT,
-    downtime_count INT,
-    
-    -- Scheduled vs Unscheduled
-    scheduled_downtime_hours FLOAT,
-    unscheduled_downtime_hours FLOAT,
-    
-    -- Reclean Analysis
-    reclean_events INT,
-    reclean_rate FLOAT,
-    
-    -- Metadata
-    calculation_timestamp DATETIME DEFAULT GETDATE(),
-    
-    -- Unique constraint
-    CONSTRAINT UQ_downtime_summary UNIQUE (ENTITY, FACILITY, CEID, YEARWW, DOWNTIME_TYPE, DOWNTIME_CLASS)
-);
-
-
-
-
-
-CREATE TABLE dbo.DimDate (
-    date_key INT PRIMARY KEY,
-    full_date DATE NOT NULL,
-    year INT NOT NULL,
-    quarter INT NOT NULL,
-    month INT NOT NULL,
-    week_of_year INT NOT NULL,
-    day_of_year INT NOT NULL,
-    day_of_month INT NOT NULL,
-    day_of_week INT NOT NULL,
-    day_name VARCHAR(10) NOT NULL,
-    month_name VARCHAR(10) NOT NULL,
-    is_weekend BIT NOT NULL,
-    is_holiday BIT DEFAULT 0,
-    fiscal_year INT,
-    fiscal_quarter INT,
-    fiscal_week VARCHAR(20),
-    work_week VARCHAR(20),
-    ww_year INT,
-    ww_number INT
-);
-
-
-
-
-
-
-CREATE TABLE dbo.DimEntity (
-    entity_key INT IDENTITY(1,1) PRIMARY KEY,
-    ENTITY VARCHAR(100) NOT NULL UNIQUE,
-    FACILITY VARCHAR(50),
-    CEID VARCHAR(100),
-    TOOLSET VARCHAR(100),
-    FUNCTIONAL_AREA VARCHAR(100),
-    Dominant_Tech_Node VARCHAR(50),
-    AltairFlag VARCHAR(20),
-    
-    -- Metadata
-    first_seen_date DATE,
-    last_seen_date DATE,
-    is_active BIT DEFAULT 1
-);
+    try:
+        # Handle full refresh
+        if full_refresh:
+            logger.info("Full refresh requested - truncating Silver layer tables")
+            # ... existing truncation code ...
+        
+        # ===== ADD THIS SECTION =====
+        # Step 1: Populate DimDate (do this first)
+        logger.info("=" * 60)
+        logger.info("Step 1: Populating DimDate dimension")
+        logger.info("=" * 60)
+        
+        dim_date_rows = populate_dim_date(
+            start_year=2020,
+            end_year=2030,
+            connector=connector
+        )
+        logger.info(f"DimDate populated with {dim_date_rows:,} rows")
+        # ===== END ADD SECTION =====
+        
+        # Step 2: Load from Bronze and enrich
+        logger.info("=" * 60)
+        logger.info("Step 2: Loading and enriching PM Flex data")
+        logger.info("=" * 60)
+        
+        # ... rest of existing code ...
