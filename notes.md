@@ -3,7 +3,7 @@ def _load_enriched(self, df: pd.DataFrame) -> int:
     Load enriched data to pm_flex_enriched table.
     
     Args:
-        df: Enriched DataFrame
+        df: Enriched DataFrame (should contain ALL original columns + enriched columns)
         
     Returns:
         Number of rows loaded
@@ -11,41 +11,42 @@ def _load_enriched(self, df: pd.DataFrame) -> int:
     # Prepare data for loading
     load_df = df.copy()
     
-    # Rename pm_flex_raw_id to source_pm_flex_raw_id
+    # Rename pm_flex_raw_id to source_pm_flex_raw_id for foreign key
     if 'pm_flex_raw_id' in load_df.columns:
         load_df = load_df.rename(columns={'pm_flex_raw_id': 'source_pm_flex_raw_id'})
     
-    # Remove columns that don't exist in pm_flex_enriched table
-    # (like load_timestamp from Bronze which becomes enrichment_timestamp in Silver)
-    drop_cols = ['load_timestamp', 'source_file', 'source_ww']
-    for col in drop_cols:
+    # Remove columns that exist in Bronze but have different names in Silver
+    columns_to_drop = ['load_timestamp']  # Bronze has this, Silver uses enrichment_timestamp
+    for col in columns_to_drop:
         if col in load_df.columns:
             load_df = load_df.drop(columns=[col])
     
-    # Get list of columns in the target table
-    table_cols_query = """
-    SELECT COLUMN_NAME 
-    FROM INFORMATION_SCHEMA.COLUMNS 
-    WHERE TABLE_NAME = 'pm_flex_enriched' 
-    AND TABLE_SCHEMA = 'dbo'
-    AND COLUMN_NAME NOT IN ('pm_flex_enriched_id')  -- Exclude identity column
-    ORDER BY ORDINAL_POSITION
-    """
+    # Log what we're about to load
+    self.logger.info(f"Preparing to load {len(load_df):,} rows to pm_flex_enriched")
+    self.logger.info(f"DataFrame has {len(load_df.columns)} columns")
     
-    table_cols_df = self.connector.fetch_dataframe(table_cols_query)
-    table_columns = table_cols_df['COLUMN_NAME'].tolist()
+    # List of all columns (for debugging if needed)
+    self.logger.debug(f"Column list: {list(load_df.columns)[:30]}...")  # First 30
     
-    # Only keep columns that exist in both the DataFrame and the target table
-    final_cols = [col for col in load_df.columns if col in table_columns]
-    load_df = load_df[final_cols]
-    
-    self.logger.info(f"Loading {len(load_df):,} rows with {len(final_cols)} columns to pm_flex_enriched")
-    
-    rows_loaded = self.connector.load_dataframe(
-        df=load_df,
-        table_name='pm_flex_enriched',
-        schema=self.schema_name,
-        if_exists='append'
-    )
-    
-    return rows_loaded
+    try:
+        rows_loaded = self.connector.load_dataframe(
+            df=load_df,
+            table_name='pm_flex_enriched',
+            schema=self.schema_name,
+            if_exists='append',
+            chunksize=1000
+        )
+        
+        self.logger.info(f"Successfully loaded {rows_loaded:,} rows to pm_flex_enriched")
+        return rows_loaded
+        
+    except Exception as e:
+        self.logger.error(f"Failed to load enriched data: {str(e)}")
+        
+        # Check for column mismatch
+        if "Invalid column name" in str(e):
+            # Extract the problematic column from error message
+            self.logger.error("Column mismatch detected!")
+            self.logger.error(f"DataFrame columns: {list(load_df.columns)}")
+        
+        raise
